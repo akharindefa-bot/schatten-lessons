@@ -1,0 +1,130 @@
+name: transcribe-episode
+
+# Parallel Whisper transcription for Schatten lessons.
+# Splits episode audio into N overlapping chunks, transcribes each on its own
+# runner with faster-whisper (large-v3-turbo, word timestamps), uploads one
+# JSON artifact per chunk. Merge happens locally (see lessons-work merge script).
+on:
+  workflow_dispatch:
+    inputs:
+      audio_url:
+        description: 'Direct MP3 URL of the episode'
+        required: true
+        type: string
+      episode:
+        description: 'Episode id, e.g. eg698'
+        required: true
+        type: string
+      chunks:
+        description: 'Parallel chunk count'
+        required: false
+        default: '8'
+        type: string
+      language:
+        description: 'Audio language code'
+        required: false
+        default: 'de'
+        type: string
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.chunks.outputs.matrix }}
+    steps:
+      - name: Download audio and compute chunk windows
+        id: chunks
+        env:
+          AUDIO_URL: ${{ inputs.audio_url }}
+          NCHUNKS: ${{ inputs.chunks }}
+          OVERLAP: '15'
+        run: |
+          curl -sSL --retry 3 -o episode.mp3 "$AUDIO_URL"
+          DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 episode.mp3)
+          echo "audio duration: $DUR s"
+          python3 - "$DUR" <<'EOF'
+          import json, os, sys
+          dur = float(sys.argv[1])
+          n = int(os.environ["NCHUNKS"]); ov = float(os.environ["OVERLAP"])
+          items = []
+          for i in range(n):
+              s_nom = i * dur / n
+              e_nom = (i + 1) * dur / n
+              s = max(0.0, s_nom - (ov if i > 0 else 0.0))
+              e = min(dur, e_nom + (ov if i < n - 1 else 0.0))
+              items.append({
+                  "index": i,
+                  "start": round(s, 2), "end": round(e, 2),
+                  "keep_from": round(s_nom, 2), "keep_to": round(e_nom, 2),
+              })
+          line = "matrix=" + json.dumps({"include": items})
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(line + "\n")
+          print(f"{n} chunks over {dur:.1f}s")
+          EOF
+
+  transcribe:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Cache Whisper model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: faster-whisper-large-v3-turbo-v1
+
+      - name: Extract chunk audio
+        env:
+          AUDIO_URL: ${{ inputs.audio_url }}
+        run: |
+          curl -sSL --retry 3 -o episode.mp3 "$AUDIO_URL"
+          ffmpeg -v error -y -ss ${{ matrix.start }} -to ${{ matrix.end }} \
+            -i episode.mp3 -ar 16000 -ac 1 -c:a pcm_s16le chunk.wav
+          ls -la chunk.wav
+
+      - name: Transcribe chunk (faster-whisper, word timestamps)
+        run: |
+          pip install -q faster-whisper
+          python3 <<'EOF'
+          import json
+          from faster_whisper import WhisperModel
+          model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+          segments, info = model.transcribe(
+              "chunk.wav",
+              language="${{ inputs.language }}",
+              word_timestamps=True,
+          )
+          out = []
+          for seg in segments:
+              words = [
+                  {"word": w.word, "start": round(w.start, 3), "end": round(w.end, 3)}
+                  for w in (seg.words or [])
+              ]
+              out.append({
+                  "start": round(seg.start, 3),
+                  "end": round(seg.end, 3),
+                  "text": seg.text,
+                  "words": words,
+              })
+          fn = "chunk_${{ matrix.index }}.json"
+          json.dump({
+              "chunk_index": ${{ matrix.index }},
+              "chunk_start": ${{ matrix.start }},
+              "keep_from": ${{ matrix.keep_from }},
+              "keep_to": ${{ matrix.keep_to }},
+              "segments": out,
+          }, open(fn, "w"), ensure_ascii=False)
+          nw = sum(len(s["words"]) for s in out)
+          print(f"wrote {fn}: {len(out)} segments, {nw} words")
+          EOF
+
+      - name: Upload chunk result
+        uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.index }}
+          path: chunk_${{ matrix.index }}.json
+          retention-days: 7
