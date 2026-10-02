@@ -32,6 +32,9 @@ jobs:
     outputs:
       matrix: ${{ steps.chunks.outputs.matrix }}
     steps:
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
       - name: Download audio and compute chunk windows
         id: chunks
         env:
@@ -71,6 +74,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
       - name: Cache Whisper model
         uses: actions/cache@v4
         with:
