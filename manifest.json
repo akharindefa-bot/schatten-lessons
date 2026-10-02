@@ -1,12 +1,18 @@
 {
  "format": 1,
- "updated": "2026-10-01",
+ "updated": "2026-10-02",
  "lessons": [
   {
    "id": "eg320",
    "version": 2,
    "title": "Easy German 320 · How to make small talk in Germany",
    "path": "lessons/eg320/lesson.json"
+  },
+  {
+   "id": "eg698",
+   "version": 1,
+   "title": "Easy German 698 · Wie Lara ganz alleine akzentfrei Deutsch gelernt hat",
+   "path": "lessons/eg698/lesson.json"
   }
  ]
 }
