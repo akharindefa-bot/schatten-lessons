@@ -96,11 +96,18 @@ jobs:
         run: |
           pip install -q faster-whisper
           python3 <<'EOF'
-          import json
+          import json, wave
+          import numpy as np
           from faster_whisper import WhisperModel
+          # decode wav ourselves (avoids a PyAV API incompatibility in decode_audio)
+          with wave.open("chunk.wav", "rb") as w:
+              assert w.getnchannels() == 1 and w.getsampwidth() == 2 and w.getframerate() == 16000, \
+                  f"unexpected wav format: {w.getnchannels()}ch {w.getsampwidth()*8}bit {w.getframerate()}Hz"
+              pcm = w.readframes(w.getnframes())
+          audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
           model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
           segments, info = model.transcribe(
-              "chunk.wav",
+              audio,
               language="${{ inputs.language }}",
               word_timestamps=True,
           )
