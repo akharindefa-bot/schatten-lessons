@@ -39,7 +39,7 @@ jobs:
           NCHUNKS: ${{ inputs.chunks }}
           OVERLAP: '15'
         run: |
-          curl -sSL --retry 3 -o episode.mp3 "$AUDIO_URL"
+          curl -sSL --retry 3 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -o episode.mp3 "$AUDIO_URL"
           DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 episode.mp3)
           echo "audio duration: $DUR s"
           python3 - "$DUR" <<'EOF'
@@ -81,7 +81,7 @@ jobs:
         env:
           AUDIO_URL: ${{ inputs.audio_url }}
         run: |
-          curl -sSL --retry 3 -o episode.mp3 "$AUDIO_URL"
+          curl -sSL --retry 3 -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" -o episode.mp3 "$AUDIO_URL"
           ffmpeg -v error -y -ss ${{ matrix.start }} -to ${{ matrix.end }} \
             -i episode.mp3 -ar 16000 -ac 1 -c:a pcm_s16le chunk.wav
           ls -la chunk.wav
